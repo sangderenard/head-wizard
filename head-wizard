@@ -1,0 +1,640 @@
+#!/bin/bash
+
+# primitive reading of xrandr data. need to pull mode list and not infer from one line
+
+HORIZONTALSCREENMARGIN=2
+FIELDSPERDISPLAY=6
+
+function pollxrandr {
+	if [ "$NOMENUMODE" == "0" ]; then
+		VERTICALJUSTIFICATION=3
+	fi
+
+	XRANDRDATA=( $(xrandr | grep ' connected[a-zA-Z ]*[0-9]*x[0-9]*' | sed -e 's/^\([a-zA-Z0-9-]*\)[a-z ]*\([0-9]*\)x\([0-9]*\)+\([0-9]*\)+\([0-9]*\)[ ]*\([a-zA-Z]*\)[ ]*(.*/\1 \2 \3 \4 \5 rot:\6/' | tr '\n\r' ' ' | sed -e 's/rot: /rot:normal /g' | sed -e 's/rot://g') )
+	let NUMBEROFDISPLAYS=${#XRANDRDATA[*]}/$FIELDSPERDISPLAY
+
+	populatedisplayarrays
+}
+
+#  apply the requested --rotate modifiers to the default list of rotations ( currently the default is all normal )
+
+function fillrotationtable {
+
+	ROTATIONORDERARRAY=( $(echo $ROTATIONORDER) )
+
+	local ROTATIONORDERARRAYLENGTH=${#ROTATIONORDERARRAY[*]}
+
+	i=0
+	j=0
+
+	while [ "$i" -lt "$ROTATIONORDERARRAYLENGTH" ]
+	do
+		let j=$i+1
+		
+		if ( [ "${SCREENROTATIONS[${ROTATIONORDERARRAY[$i]}]}" == "normal" ] && ( [ "${ROTATIONORDERARRAY[$j]}" == "left" ] ||  [ "${ROTATIONORDERARRAY[$j]}" == "right" ] ) ) ||\
+		 ( ( [ "${SCREENROTATIONS[${ROTATIONORDERARRAY[$i]}]}" == "left" ] || [ "${SCREENROTATIONS[${ROTATIONORDERARRAY[$i]}]}" == "right" ] ) && [ "${ROTATIONORDERARRAY[$j]}" == "normal" ] ); then
+			local TEMPDIMHOLDER=${XRESOLUTIONS[${ROTATIONORDERARRAY[$i]}]}
+			XRESOLUTIONS[${ROTATIONORDERARRAY[$i]}]=${YRESOLUTIONS[${ROTATIONORDERARRAY[$i]}]}
+			YRESOLUTIONS[${ROTATIONORDERARRAY[$i]}]=$TEMPDIMHOLDER
+		fi
+
+		SCREENROTATIONS[${ROTATIONORDERARRAY[$i]}]=${ROTATIONORDERARRAY[$j]}
+
+		let i=$j+1
+	done
+
+	i=0
+	j=0
+}
+
+function setthetallboi {
+	TALLBOI=0
+	REDFIM=0
+
+	for i in ${REORDEREDLIST[@]}
+		do
+		REFDIM=${YRESOLUTIONS[$i]}
+
+		if [ "$TALLBOI" -lt "$REFDIM" ]; then
+			TALLBOI=$REFDIM
+		fi
+	done
+}
+
+function inascreen {
+	local displaychars=( "A" "B" "C" "D" "E" "F" "G" "H" )
+	local i=0
+	local j=0
+	local k=0
+
+	for i in ${REORDEREDLIST[@]}
+	do
+		if [ "$1" -gt "${SCALEXPOSITIONS[$i]}" ] || [ "$1" == "${SCALEXPOSITIONS[$i]}" ]; then
+			let k=${SCALEXPOSITIONS[$i]}+${SCALEXRESOLUTIONS[$i]}
+			if [ "$1" -lt "$k" ] || [ "$1" == "$k" ]; then
+				if [ "$2" -gt "${SCALEYPOSITIONS[$i]}" ] || [ "$2" == "${SCALEYPOSITIONS[$i]}" ]; then
+					let k=${SCALEYPOSITIONS[$i]}+${SCALEYRESOLUTIONS[$i]}
+					if [ "$2" -lt "$k" ] || [ "$2" == "$k" ]; then
+						#echo "${displaychars[$i]}"
+						echo "$i"
+						return
+					fi
+				fi
+			fi
+		fi
+	done
+	echo "."
+}
+
+function makeaprettypicture {
+
+	local PRECISION=20
+	local CONSOLEASPECTRATIO=`bc -l <<< "scale=$PRECISION; 2/5"`
+
+	local TERMWIDTH=$(tput cols)
+	let TERMWIDTH=$TERMWIDTH-2
+	local TERMHEIGHT=$(tput lines)
+	TERMHEIGHT=`bc -l <<< "scale=0; ($TERMHEIGHT/$CONSOLEASPECTRATIO)/1"`
+	
+	setthetallboi
+	local MAXHEIGHT=$TALLBOI
+	local LASTDISPLAYINDEX=${#DISPLAYNAME[*]}
+	let LASTDISPLAYINDEX=$LASTDISPLAYINDEX-1
+	local MAXWIDTH=${XRESOLUTIONS[${REORDEREDLIST[$LASTDISPLAYINDEX]}]}
+	let MAXWIDTH=$MAXWIDTH+${XPOSITIONS[${REORDEREDLIST[$LASTDISPLAYINDEX]}]}
+
+	local XSCALEFACTOR=`bc -l <<< "scale=$PRECISION; $TERMWIDTH / $MAXWIDTH"`
+	local YSCALEFACTOR=`bc -l <<< "scale=$PRECISION; $TERMHEIGHT / $MAXHEIGHT"`
+
+	if (( `bc -l <<< "$XSCALEFACTOR < $YSCALEFACTOR"` )); then
+		local SCALEFACTOR=$XSCALEFACTOR
+	else
+		local SCALEFACTOR=$YSCALEFACTOR
+	fi
+
+	local DRAWWIDTH=`bc -l <<< "scale=0; ($MAXWIDTH*$SCALEFACTOR)/1"`
+	local DRAWHEIGHT=`bc -l <<< "scale=0; ($MAXHEIGHT*$SCALEFACTOR*$CONSOLEASPECTRATIO)/1"`
+
+	local i=0
+	local j=0
+	local drawstring=""
+	local drawchar=""
+
+	local linearray=()
+
+
+	for i in ${REORDEREDLIST[@]}
+	do
+		SCALEXPOSITIONS[$i]=`bc -l <<< "scale=0; (${XPOSITIONS[$i]}*$SCALEFACTOR)/1"`
+		SCALEYPOSITIONS[$i]=`bc -l <<< "scale=0; (${YPOSITIONS[$i]}*$SCALEFACTOR*$CONSOLEASPECTRATIO)/1"`
+		SCALEXRESOLUTIONS[$i]=`bc -l <<< "scale=0; (${XRESOLUTIONS[$i]}*$SCALEFACTOR)/1"`
+		SCALEYRESOLUTIONS[$i]=`bc -l <<< "scale=0; (${YRESOLUTIONS[$i]}*$SCALEFACTOR*$CONSOLEASPECTRATIO)/1"`
+
+	done
+
+
+	while [ "$i" -lt "$DRAWHEIGHT" ]
+	do
+		j=0
+		drawstring=""
+		linearray=()
+		while [ "$j" -lt "$DRAWWIDTH" ]
+		do
+			drawchar=$(inascreen "$j" "$i" "$SCALEFACTOR")
+			linearray[$j]=$drawchar
+#			drawstring="$drawstring$drawchar"
+			let j=$j+1
+		done
+		echo "${linearray[@]}" | sed -e "s/\ //g"
+		let i=$i+1
+	done
+}
+
+
+
+# do you want to turn the monitors off and back on with --off and --auto from xrandr
+
+RESETDISPLAYS=0
+
+# the rotationorder is the command line argument generated "order" of rotations to apply to monitors
+
+ROTATIONORDER=""
+
+# default non reordered state
+
+ISREORDEREDLIST=0
+NORUN=0
+DOREPOSITION=0
+VERTICALJUSTIFICATIONREADABLE=( "Top" "Center" "Bottom" "None")
+VERTICALJUSTIFICATION=3
+
+function cleanrotation {
+
+	for i in ${!SCREENROTATIONS[*]}
+	do
+		if [ "${SCREENROTATIONS[$i]}" != "normal" ]; then
+			ROTATIONAXISTEMP=${XRESOLUTIONS[$i]}
+			XRESOLUTIONS[$i]=${YRESOLUTIONS[$i]}
+			YRESOLUTIONS[$i]=$ROTATIONAXISTEMP
+		fi
+
+	done
+
+}
+
+function determineposition {
+	local STOPSORT=0
+	local SORTINDEX=0
+	local NEXTSORTINDEX=1
+	local TEMPREORDERINDEX=-1
+
+	while [ "$STOPSORT" == "0" ] & [ "$NEXTSORTINDEX" -lt "$NUMBEROFDISPLAYS" ]
+	do
+		if [ "${XPOSITIONS[${REORDEREDLIST[$SORTINDEX]}]}" -gt "${XPOSITIONS[${REORDEREDLIST[$NEXTSORTINDEX]}]}" ]; then
+#			echo "current ${XPOSITIONS[${REORDEREDLIST[$SORTINDEX]}]} index $SORTINDEX greater than next ${XPOSITIONS[${REORDEREDLIST[$NEXTSORTINDEX]}]} index $NEXTSORTINDEX"
+			TEMPREORDERINDEX=${REORDEREDLIST[$SORTINDEX]}
+			REORDEREDLIST[$SORTINDEX]=${REORDEREDLIST[$NEXTSORTINDEX]}
+			REORDEREDLIST[$NEXTSORTINDEX]=$TEMPREORDERINDEX
+			TEMPREORDERINDEX=-1
+			SORTINDEX=0
+			NEXTSORTINDEX=1
+		else
+			SORTINDEX=$NEXTSORTINDEX
+			let NEXTSORTINDEX=$NEXTSORTINDEX+1
+		fi
+	done
+
+#	echo ${REORDEREDLIST[*]}
+
+}
+
+function reposition {
+	PREVIOUSDISPLAY=-1
+
+	for i in ${REORDEREDLIST[@]}
+	do
+		if [ "$ISREORDEREDLIST" == "1" ] || [ "$ROTATIONORDER" != "" ]; then
+			if [ "$PREVIOUSDISPLAY" == "-1" ]; then
+				XPOSITIONS[$i]=0
+			else
+				let XPOSITIONS[$i]=${XPOSITIONS[$PREVIOUSDISPLAY]}+${XRESOLUTIONS[$PREVIOUSDISPLAY]}+$HORIZONTALSCREENMARGIN
+			fi
+		else
+			XPOSITIONS[$i]=${ORIGINALXPOSITIONS[$i]}
+		fi
+
+		PREVIOUSDISPLAY=$i
+	done
+
+
+	if [ "$VERTICALJUSTIFICATION" == "0" ]; then
+		for i in ${REORDEREDLIST[@]}
+		do
+			YPOSITIONS[$i]=0
+		done
+
+	else
+
+		setthetallboi
+
+		for i in ${REORDEREDLIST[@]}
+		do
+#			if [ "${SCREENROTATIONS[$i]}" == "normal" ]; then
+				if [ "$VERTICALJUSTIFICATION" == "2" ]; then
+					let YPOSITIONS[$i]=$TALLBOI-${YRESOLUTIONS[$i]}
+				elif [ "$VERTICALJUSTIFICATION" == "1" ]; then
+					let YPOSITIONS[$i]=($TALLBOI-${YRESOLUTIONS[$i]})/2
+				else
+					YPOSITIONS[$i]=${ORIGINALYPOSITIONS[$i]}
+				fi
+#			else
+#				if [ "$VERTICALJUSTIFICATION" == "2" ]; then
+#					let YPOSITIONS[$i]=$TALLBOI-${XRESOLUTIONS[$i]}
+#				else
+#					let YPOSITIONS[$i]=($TALLBOI-${XRESOLUTIONS[$i]})/2
+#				fi
+#			fi
+		done
+	fi
+}
+
+function dodisplayresets {
+
+	j=0
+	for i in ${REORDEREDLIST[@]}
+	do
+		OLDROTATIONLIST[$i]=${SCREENROTATIONS[$i]}
+		if [ "$ISREORDEREDLIST" == "1" ]; then
+			OLDREORDERLIST[$j]=$i
+		else
+			OLDREORDERLIST[$j]=-1
+		fi
+		let j=$j+1
+	done
+	i=0	
+	j=0
+
+
+	i=0
+	j=0
+	k=0
+	if [ "$RESETDISPLAYS" == "1" ]; then
+
+		while [ "$i" -lt "$NUMBEROFDISPLAYS" ]
+		do
+			let j=$i*$FIELDSPERDISPLAY
+			if [ "$k" == "0" ]; then
+				xrandr --output ${XRANDRDATA[$j]} --off
+			else
+				xrandr --output ${XRANDRDATA[$j]} --auto
+			fi
+			let i=$i+1
+			if [ "$k" == "0" ] && [ "$i" == "$NUMBEROFDISPLAYS" ]; then
+				i=0
+				k=1
+			fi
+		done
+		i=0
+		j=0
+		k=0
+
+		# update the xrandr info
+		pollxrandr
+		for i in ${!OLDROTATIONLIST[*]}
+		do
+			SCREENROTATIONS[$i]=${OLDROTATIONLIST[$i]}
+		done
+
+		if [ "${OLDREORDERLIST[0]}" != "-1" ]; then
+			for i in ${!OLDREORDERLIST[*]}
+			do
+				REORDEREDLIST[$i]=${OLDREORDERLIST[$i]}
+				echo "$i ${REORDEREDLIST[$i]}"
+			done
+		fi
+		
+		VERTICALJUSTIFICATION=2
+		ISREORDEREDLIST=1
+		DOREPOSITION=1
+
+	fi
+}
+
+#  pull data from xrandr sed dump into parallel arrays
+function populatedisplayarrays {
+	i=0
+	j=0
+	while [ "$i" -lt "$NUMBEROFDISPLAYS" ]
+	do
+		let j=$FIELDSPERDISPLAY*$i
+		DISPLAYNAME[$i]=${XRANDRDATA[$j]}
+		let j=$j+1
+		XRESOLUTIONS[$i]=${XRANDRDATA[$j]}
+		let j=$j+1
+		YRESOLUTIONS[$i]=${XRANDRDATA[$j]}
+		let j=$j+1
+		XPOSITIONS[$i]=${XRANDRDATA[$j]}
+		ORIGINALXPOSITIONS[$i]=${XRANDRDATA[$j]}
+		let j=$j+1
+		YPOSITIONS[$i]=${XRANDRDATA[$j]}
+		ORIGINALYPOSITIONS[$i]=${XRANDRDATA[$j]}
+		let j=$j+1
+		SCREENROTATIONS[$i]=${XRANDRDATA[$j]}
+
+
+		if [ "$ISREORDEREDLIST" == "0" ]; then
+			REORDEREDLIST[$i]=$i
+		fi
+
+		let i=$i+1
+	done
+	i=0
+	j=0
+
+	if [ "$ISREORDEREDLIST" == "0" ]; then
+		determineposition
+	fi
+
+	fillrotationtable
+}
+
+
+function modepicker () {
+	if [ "$1" -gt "$2" ]; then
+		echo "$1x$2"
+	else
+		echo "$2x$1"
+	fi
+}
+
+function generatexrandrcommands {
+	# if the displays haven't been restarted on --auto, check rotation, apply changes to reported dimensions
+
+#	if [ "$RESETDISPLAYS" == "0" ]; then
+#		cleanrotation
+#	fi
+
+	# do you want to populate the screen positions with new values
+
+
+	if [ "$DOREPOSITION" == "1" ]; then
+		reposition
+	fi
+
+	# set displays in the order requested, order reported by xrandr by default
+
+	for i in ${REORDEREDLIST[@]}
+	do
+		CMNDTORUN="xrandr --output ${DISPLAYNAME[i]} --mode $(modepicker "${XRESOLUTIONS[i]}" "${YRESOLUTIONS[$i]}") --rotate ${SCREENROTATIONS[i]} --pos ${XPOSITIONS[$i]}x${YPOSITIONS[$i]}"
+		echo $CMNDTORUN
+		if [ "$NORUN" == "0" ]; then
+			$CMNDTORUN
+		fi
+
+	done
+}
+
+# processing command line arguments
+
+
+function executeselectedoptions {
+	# turn them all off then turn them all on with --auto
+
+	dodisplayresets
+
+	populatedisplayarrays
+
+	# apply the requested rotations
+
+	if [ "$NOMENUMODE" == "1" ] && [ "$DOREPOSITION" == "1" ]; then
+		reposition
+		makeaprettypicture
+	fi
+
+	generatexrandrcommands
+}
+
+NOMENUMODE=0
+
+for i in $@
+do
+
+	case "$i" in
+
+		"--reset")
+			RESETDISPLAYS=1
+			;;
+		"--rotate="[0-9]*\,[a-z]*)
+			# if there's a rotation argument just push it on the stack of them
+
+			DOREPOSITION=1
+			NEWROTATIONORDER="$(echo $i | sed -e 's/.*\=\([0-9]*\)\,\([a-z]*\)/\1 \2 /')"
+			if [ "$ROTATIONORDER" == "" ]; then
+				ROTATIONORDER="$NEWROTATIONORDER"
+			else
+				ROTATIONORDER="$ROTATIONORDER $NEWROTATIONORDER"
+			fi
+			;;
+		"--reorder="[0-9,]*)
+			DOREPOSITION=1
+			ISREORDEREDLIST=1
+			REORDEREDLIST=( $(echo $i | sed -e 's/.*\=\([0-9\,]*\)/\1/' | tr '\r\n\,' ' ') )
+			;;		
+		"--norun")
+			NORUN=1
+			;;
+		"--vertj="[0123]*)
+			DOREPOSITION=1
+			VERTICALJUSTIFICATION=$(echo $i | sed -e 's/.*\([0123]\)/\1/')
+			;;
+		"--reposition")
+			DOREPOSITION=1
+			;;
+		"--sethmargin="[0-9]*)
+			HORIZONTALSCREENMARGIN=$(echo $i | sed -e 's/.*\=\([0-9]*\)/\1/')
+			DOREPOSITION=1
+			;;
+		"--reposition"[=a-zA-Z]*)
+			DOREPOSITION=1
+			;;
+
+	esac
+
+	NOMENUMODE=1
+done
+
+function checkifrepositioningstill {
+	if [ "$ISREORDEREDLIST" == "1" ] ||\
+	 [ "$VERTICALJUSTIFICATION" != "3" ] ||\
+	 [ "$RESETDISPLAYS" == "1" ] || [ "$ROTATIONORDER" != "" ]; then
+		DOREPOSITION=1
+	else
+		DOREPOSITION=0
+	fi 
+}
+
+function horizontalscreenmarginchooser {
+	echo "enter the number of pixels to space between horizontally adjascent screens"
+	echo "the current value is: $HORIZONTALSCREENMARGIN"
+	local PROPOSEDMARGIN
+	read PROPOSEDMARGIN
+	HORIZONTALSCREENMARGIN=$PROPOSEDMARGIN
+}
+
+function rotationchooser {
+	echo "enter the requested rotation in the following format: ##,[left,right,normal]"
+	echo "turning the second display adapter 90 degrees counterclockwise would be: \"1,left\""
+	echo "the current rotation settings are: ${SCREENROTATIONS[@]}"
+	local PROPOSEDORDER
+	read PROPOSEDORDER
+	NEWROTATIONORDER="$(echo $PROPOSEDORDER | sed -e 's/\([0-9]*\)\,\([a-z]*\)/\1 \2 /')"
+	if [ "$ROTATIONORDER" == "" ]; then
+		ROTATIONORDER="$NEWROTATIONORDER"
+	else
+		ROTATIONORDER="$ROTATIONORDER $NEWROTATIONORDER"
+	fi
+	
+}
+
+function reorderingchooser {
+	echo "enter the display order in the following format: ## ## ## ##"
+	echo "example: the default order for 4 monitors would be: \"0 1 2 3\""
+	echo "the nesxt order is currently set to: ${REORDEREDLIST[@]}"
+	local PROPOSEDORDER
+	read PROPOSEDORDER
+	PROPOSEDORDER=( ${PROPOSEDORDER[@]} )
+	echo "chosen: ${PROPOSEDORDER[@]}"
+	if [ "${#PROPOSEDORDER[*]}" == "${#REORDEREDLIST[*]}" ]; then
+		REORDEREDLIST=( ${PROPOSEDORDER[@]} )
+	fi
+	ISREORDEREDLIST=1
+	DOREPOSITION=1
+}
+
+function mainmenu {
+	xrefresh
+	if [ "$NOMENUMODE" == "1" ]; then
+		executeselectedoptions
+		exit
+	fi
+#	NORUN=1
+	tableformatter="%s\n"
+	i=1
+
+	while [ "$i" -lt "$NUMBEROFDISPLAYS" ]
+	do
+		tableformatter="%s\t$tableformatter"
+		let i=$i+1
+	done
+	
+	i=0
+
+	makeaprettypicture
+
+	printf "\n"
+	printf "%s\t\t$tableformatter"\
+		 "ID:" ${!DISPLAYNAME[*]}\
+		 "Adaptor_name:" ${DISPLAYNAME[@]}\
+		 "X_dimension:" ${XRESOLUTIONS[@]}\
+		 "Y_dimension:" ${YRESOLUTIONS[@]}\
+		 "X_position:" ${XPOSITIONS[@]}\
+		 "Y_position:" ${YPOSITIONS[@]}\
+		 "Rotation:" ${SCREENROTATIONS[@]} | column -t
+	printf "\n"
+	printf "Proposed screen order L to R: ${REORDEREDLIST[*]}\n"
+
+
+	menuarray=( "Reset Displays: $RESETDISPLAYS" "Reorder Displays: $ISREORDEREDLIST"\
+			 "Reposition Displays: $DOREPOSITION" "Dry Run: $NORUN"\
+			 "Edit Rotation/Translation"\
+			 "Vertical Justification: ${VERTICALJUSTIFICATIONREADABLE[$VERTICALJUSTIFICATION]}"\
+			 "Set Horizontal Screen Margin: $HORIZONTALSCREENMARGIN"\
+			 "Execute" "Exit")
+	select menuchoice in "${menuarray[@]}"
+	do
+		echo $menuchoice
+		case $menuchoice in
+			"Reset"[a-zA-Z0-9\:\ ]*)
+					echo "butts"
+				if [ "$RESETDISPLAYS" == "0" ]; then
+					RESETDISPLAYS=1
+				else
+					RESETDISPLAYS=0
+				fi
+			;;
+			"Reposition"[a-zA-Z0-9\:\ ]*)
+				if [ "$DOREPOSITION" == "0" ]; then
+					DOREPOSITION=1
+				else
+					DOREPOSITION=0
+					pollxrandr
+				fi
+			;;
+			
+			"Edit"[a-zA-Z0-9\:\ ]*)
+				rotationchooser
+				fillrotationtable
+				DOREPOSITION=1
+				reposition
+			;;
+
+			"Reorder"[a-zA-Z0-9\:\ ]*)
+				reorderingchooser
+				checkifrepositioningstill
+				reposition
+			;;
+			"Dry"[a-zA-Z0-9\:\ ]*)
+				if [ "$NORUN" == "0" ]; then
+					NORUN=1
+				else
+					NORUN=0
+				fi
+			;;
+			"Vertical"[a-zA-Z0-9\:\ ]*)
+				if [ "$VERTICALJUSTIFICATION" == "3" ]; then
+					VERTICALJUSTIFICATION=0
+				else
+					let VERTICALJUSTIFICATION=$VERTICALJUSTIFICATION+1
+				fi
+				checkifrepositioningstill
+				reposition
+			;;
+			"Set Horizontal Screen Margin"[a-zA-Z0-9\:\ ]*)
+				horizontalscreenmarginchooser
+				DOREPOSITION=1
+				reposition
+			;;
+			"Exit")
+				exit
+			;;
+			"Execute")
+				executeselectedoptions
+				DOREPOSITION=0
+				pollxrandr
+			;;
+		esac
+		checkifrepositioningstill
+		return
+	done
+}
+
+# get current xrandr info
+
+pollxrandr
+
+i=0
+j=0
+k=0
+
+
+
+
+
+INMENU=1
+
+while [ "$INMENU" == "1" ]
+do
+	mainmenu
+done
+
+

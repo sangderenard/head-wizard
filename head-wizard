@@ -299,23 +299,28 @@ function dodisplayresets {
 		k=0
 
 		# update the xrandr info
-		pollxrandr
-		for i in ${!OLDROTATIONLIST[*]}
-		do
-			SCREENROTATIONS[$i]=${OLDROTATIONLIST[$i]}
-		done
+		if [ "$NORUN" == 0 ]; then
+			pollxrandr
 
-		if [ "${OLDREORDERLIST[0]}" != "-1" ]; then
-			for i in ${!OLDREORDERLIST[*]}
+
+			for i in ${!OLDROTATIONLIST[*]}
 			do
-				REORDEREDLIST[$i]=${OLDREORDERLIST[$i]}
-				echo "$i ${REORDEREDLIST[$i]}"
+				SCREENROTATIONS[$i]=${OLDROTATIONLIST[$i]}
 			done
-		fi
-		
-		VERTICALJUSTIFICATION=2
-		ISREORDEREDLIST=1
-		DOREPOSITION=1
+
+			if [ "${OLDREORDERLIST[0]}" != "-1" ]; then
+				for i in ${!OLDREORDERLIST[*]}
+				do
+					REORDEREDLIST[$i]=${OLDREORDERLIST[$i]}
+					echo "$i ${REORDEREDLIST[$i]}"
+				done
+			fi
+
+			VERTICALJUSTIFICATION=3
+			ISREORDEREDLIST=0
+			DOREPOSITION=0
+		fi		
+
 
 	fi
 }

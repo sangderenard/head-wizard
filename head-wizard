@@ -254,6 +254,8 @@ function reposition {
 #					let YPOSITIONS[$i]=($TALLBOI-${XRESOLUTIONS[$i]})/2
 #				fi
 #			fi
+
+			echo "The Y position for display $i is ${YPOSITIONS[$i]}"
 		done
 	fi
 }
@@ -263,12 +265,17 @@ function dodisplayresets {
 	j=0
 	for i in ${REORDEREDLIST[@]}
 	do
+		OLDREORDEREDLIST[$j]=$i
+		
+		echo "remembering display $i's position"
+
+
 		OLDROTATIONLIST[$i]=${SCREENROTATIONS[$i]}
-		if [ "$ISREORDEREDLIST" == "1" ]; then
-			OLDREORDERLIST[$j]=$i
-		else
-			OLDREORDERLIST[$j]=-1
-		fi
+
+		echo "remembering display $i's rotation ${OLDROTATIONLIST[$i]}"
+		OLDXPOSITIONS[$i]=${XPOSITIONS[$i]}
+		OLDYPOSITIONS[$i]=${YPOSITIONS[$i]}
+
 		let j=$j+1
 	done
 	i=0	
@@ -284,10 +291,19 @@ function dodisplayresets {
 		do
 			let j=$i*$FIELDSPERDISPLAY
 			if [ "$k" == "0" ]; then
-				xrandr --output ${XRANDRDATA[$j]} --off
+				if [ "$NORUN" == "0" ]; then
+					xrandr --output ${XRANDRDATA[$j]} --off
+				else
+					echo "xrandr --output ${XRANDRDATA[$j]} --off"
+				fi
 			else
-				xrandr --output ${XRANDRDATA[$j]} --auto
+				if [ "$NORUN" == "0" ]; then
+					xrandr --output ${XRANDRDATA[$j]} --auto
+				else
+					echo "xrandr --output ${XRANDRDATA[$j]} --auto"
+				fi
 			fi
+
 			let i=$i+1
 			if [ "$k" == "0" ] && [ "$i" == "$NUMBEROFDISPLAYS" ]; then
 				i=0
@@ -303,22 +319,41 @@ function dodisplayresets {
 			pollxrandr
 
 
-			for i in ${!OLDROTATIONLIST[*]}
+			for i in ${!OLDREORDEREDLIST[*]}
 			do
-				SCREENROTATIONS[$i]=${OLDROTATIONLIST[$i]}
+				REORDEREDLIST[$i]=${OLDREORDEREDLIST[$i]}
+				echo "remembering that the $i display is ${REORDEREDLIST[$i]}"
 			done
 
-			if [ "${OLDREORDERLIST[0]}" != "-1" ]; then
-				for i in ${!OLDREORDERLIST[*]}
-				do
-					REORDEREDLIST[$i]=${OLDREORDERLIST[$i]}
-					echo "$i ${REORDEREDLIST[$i]}"
-				done
-			fi
+			for i in ${REORDEREDLIST[@]}
+			do
 
+				if ( [ "${SCREENROTATIONS[$i]}" == "normal" ] && ( [ "${OLDROTATIONLIST[$i]}" == "left" ] || [ "${OLDROTATIONLIST[$i]}" "right" ] ) ) \
+					|| ( [ "${OLDROTATIONLIST[$i]}" == "normal" ] && ( [ "${SCREENROTATIONS[$i]}" == "left" ] || [ "${SCREENROTATIONS[$i]}" "right" ] ) ); then
+					local tempdimvar=${XRESOLUTIONS[$i]}
+					XRESOLUTIONS[$i]=${YRESOLUTIONS[$i]}
+					YRESOLUTIONS[$i]=$tempdimvar
+				fi
+
+				SCREENROTATIONS[$i]=${OLDROTATIONLIST[$i]}
+
+				echo "remembering that display $i is rotated ${SCREENROTATIONS[$i]}"
+
+				ORIGINALXPOSITIONS[$i]=${OLDXPOSITIONS[$i]}
+				ORIGINALYPOSITIONS[$i]=${OLDYPOSITIONS[$i]}
+				XPOSITIONS[$i]=${OLDXPOSITIONS[$i]}
+				YPOSITIONS[$i]=${OLDYPOSITIONS[$i]}
+
+				echo "remembering that display $i is located at ${ORIGINALXPOSITIONS[$i]},${ORIGINALYPOSITIONS[$i]}"
+				
+			done
+			
 			VERTICALJUSTIFICATION=3
-			ISREORDEREDLIST=0
-			DOREPOSITION=0
+			ISREORDEREDLIST=1
+			DOREPOSITION=1
+
+			reposition
+
 		fi		
 
 
@@ -407,7 +442,7 @@ function executeselectedoptions {
 
 	dodisplayresets
 
-	populatedisplayarrays
+#	populatedisplayarrays
 
 	# apply the requested rotations
 

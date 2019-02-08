@@ -2,16 +2,140 @@
 
 # primitive reading of xrandr data. need to pull mode list and not infer from one line
 
+#2/5 was console aspect ratio reported by internet user, doesn't seem correct.
+
+PRECISION=5
+CONSOLEASPECTRATIO=`bc -l <<< "scale=$PRECISION; 1/2"`
+MAKEPREVIEW=0
+
 HORIZONTALSCREENMARGIN=2
 FIELDSPERDISPLAY=6
+
+SCREENS=()
+PORTS=()
+PORTSSTATUS=()
+PORTSSIZEX=()
+PORTSSIZEY=()
+PORTSPOSX=()
+PORTSPOSY=()
+PORTSOPTSON=()
+PORTSOPTSLIST=()
+PORTSRESLIST=()
+PORTSACTIVEMODE=()
+PORTSROTATION=()
+
+function xrandrread {
+	local screenindex=0
+	local portindex=0
+	local modeindex=0
+	local printdata=""
+	mapfile XRANDRRAWREAD < <(xrandr)
+	for i in ${!XRANDRRAWREAD[*]}
+	do
+		LINEISSCREEN=""
+		LINEISPORT=""
+		LINEISSCREEN=$(echo "${XRANDRRAWREAD[$i]}" | grep "^Screen.*")
+		if [ "$LINEISSCREEN" == "" ]; then
+			LINEISPORT=$(echo "${XRANDRRAWREAD[$i]}" | grep "^[a-zA-Z0-9-][a-zA-Z0-9-]*")
+			if [ "$LINEISPORT" != "" ]; then
+				PORTS[$portindex]=$(echo $LINEISPORT | sed -e "s/^\([a-zA-Z0-9-]*\)\ .*/\1/")
+				PORTSSTATUS[$portindex]=$(echo $LINEISPORT | sed -e "s/.*\ \([dis]*connected\).*/\1/")
+				
+				PORTSSIZEX[$portindex]=$(echo $LINEISPORT |\
+				 grep "[0-9]*x[0-9]*+[0-9]*+[0-9]*"  |\
+				 sed -e "s/.*\ \([0-9]\+\)x[0-9]\++.*/\1/")
+				PORTSSIZEY[$portindex]=$(echo $LINEISPORT |\
+				 grep "[0-9]*x[0-9]*+[0-9]*+[0-9]*"  |\
+				 sed -e "s/.*\ [0-9]\+x\([0-9]\+\)+.*/\1/")
+				PORTSPOSX[$portindex]=$(echo $LINEISPORT |\
+				 grep "[0-9]*x[0-9]*+[0-9]*+[0-9]*"  |\
+				 sed -e "s/.*\ [0-9]\+x[0-9]\++\([0-9]\+\)+[0-9]\+\ .*/\1/")
+				PORTSPOSY[$portindex]=$(echo $LINEISPORT |\
+				 grep "[0-9]*x[0-9]*+[0-9]*+[0-9]*"  |\
+				 sed -e "s/.*\ [0-9]\+x[0-9]\++[0-9]\++\([0-9]\+\)\ .*/\1/")
+
+				PORTSOPTSON[$portindex]=$(echo $LINEISPORT |\
+				 grep "[0-9]\+x[0-9]\++[0-9]\++[0-9]\+" |\
+				 sed -e "s/.*[0-9x+]\+\ *\([a-zA-Z\ ]*\)\ \+(.*/\1/")
+				local isrotated=$(echo "${PORTSOPTSON[$portindex]})" |\
+				 grep "left\|right" |\
+				 sed -e 's/.*\([lr][ei][fg][th][t]*\).*/\1/')
+				if [ "$isrotated" != "" ]; then
+					PORTSROTATION[$portindex]="$isrotated"
+				else
+					PORTSROTATION[$portindex]="normal"
+				fi
+
+				PORTSOPTSLIST[$portindex]=$(echo $LINEISPORT |\
+				 grep "[0-9]\+x[0-9]\++[0-9]\++[0-9]\+" |\
+				 sed -e "s/.*[0-9x+]\+\ [a-zA-Z\ ]*\ *(\([a-zA-Z\ ]\+\)).*/\1/")
+				PORTSRESLIST[$portindex]=""
+
+				local lookahead=1
+				let lookahead=$lookahead+$i
+				local islookaheaddone=0
+				local tempreslist=""
+				while [ "$islookaheaddone" != "1" ]
+				do
+					local lookaheadgrep=$(echo "${XRANDRRAWREAD[$lookahead]}" |\
+					 grep "^\s\+[0-9]\+x[0-9]\+")
+					if [ "$lookaheadgrep" == "" ]; then
+						islookaheaddone=1
+					else
+						tempreslist="$tempreslist "$(echo "$lookaheadgrep" |\
+						 sed -e "s/^\s\+\([0-9]\+x[0-9]\+\).*/\1/")
+						let lookahead=$lookahead+1
+					fi
+				done
+
+				PORTSRESLIST[$portindex]="$tempreslist"
+				tempreslistarray=( "$tempreslist" )
+
+				for j in ${tempreslistarray[@]}
+				do
+					if [ "${PORTSSIZEX[$portindex]}x${PORTSSIZEY[$portindex]}" == "$j" ]; then
+						PORTSACTIVEMODE[$portindex]="$j"
+					elif [ "${PORTSACTIVEMODE[$portindex]}" == "" ] && [ "${PORTSSIZEY[$portindex]}x${PORTSSIZEX[$portindex]}" == "$j" ]; then
+						PORTSACTIVEMODE[$portindex]="$j"
+					fi
+				done
+
+
+				printdata="$printdata"$(echo "captured_port:_\"${PORTS[$portindex]}\"\
+ status:_\"${PORTSSTATUS[$portindex]}\"\
+ h_size:_\"${PORTSSIZEX[$portindex]}\"\
+ v_size:_\"${PORTSSIZEY[$portindex]}\"\
+ x_pos:_\"${PORTSPOSX[$portindex]}\"\
+ y_pos:_\"${PORTSPOSY[$portindex]}\"\
+ opt_en:_\"${PORTSOPTSON[$portindex]}\"\
+ mode:_\"${PORTSACTIVEMODE[$portindex]}\"")
+				printdata="$printdata"$'\n'
+				let portindex=$portindex+1
+			fi
+		else
+			SCREENS[$screenindex]=$(echo $LINEISSCREEN | sed -e "s/^Screen\ \([0-9]*\).*/\1/")
+			echo "captured screen: ${SCREENS[$screenindex]}"
+			let screenindex=screenindex+1
+		fi
+		if [ "$LINEISSCREEN" != "" ] || [ "$LINEISPORT" != "" ]; then
+#			echo "$LINEISSCREEN$LINEISPORT"
+			butts=farty
+		fi
+	done
+
+	echo "$printdata" | column -t
+}
 
 function pollxrandr {
 	if [ "$NOMENUMODE" == "0" ]; then
 		VERTICALJUSTIFICATION=3
 	fi
 
-	XRANDRDATA=( $(xrandr | grep ' connected[a-zA-Z ]*[0-9]*x[0-9]*' | sed -e 's/^\([a-zA-Z0-9-]*\)[a-z ]*\([0-9]*\)x\([0-9]*\)+\([0-9]*\)+\([0-9]*\)[ ]*\([a-zA-Z]*\)[ ]*(.*/\1 \2 \3 \4 \5 rot:\6/' | tr '\n\r' ' ' | sed -e 's/rot: /rot:normal /g' | sed -e 's/rot://g') )
-	let NUMBEROFDISPLAYS=${#XRANDRDATA[*]}/$FIELDSPERDISPLAY
+#	XRANDRDATA=( $(xrandr | grep ' connected[a-zA-Z ]*[0-9]*x[0-9]*' | sed -e 's/^\([a-zA-Z0-9-]*\)[a-z ]*\([0-9]*\)x\([0-9]*\)+\([0-9]*\)+\([0-9]*\)[ ]*\([a-zA-Z]*\)[ ]*(.*/\1 \2 \3 \4 \5 rot:\6/' | tr '\n\r' ' ' | sed -e 's/rot: /rot:normal /g' | sed -e 's/rot://g') )
+#	let NUMBEROFDISPLAYS=${#XRANDRDATA[*]}/$FIELDSPERDISPLAY
+
+# placeholder that lets the new method be used by calls to the old variables
+	xrandrread
 
 	populatedisplayarrays
 }
@@ -88,9 +212,6 @@ function inascreen {
 
 function makeaprettypicture {
 
-	local PRECISION=20
-	local CONSOLEASPECTRATIO=`bc -l <<< "scale=$PRECISION; 2/5"`
-
 	local TERMWIDTH=$(tput cols)
 	let TERMWIDTH=$TERMWIDTH-2
 	local TERMHEIGHT=$(tput lines)
@@ -117,6 +238,7 @@ function makeaprettypicture {
 
 	local i=0
 	local j=0
+	local k=0
 	local drawstring=""
 	local drawchar=""
 
@@ -132,22 +254,27 @@ function makeaprettypicture {
 
 	done
 
+	linearray=()
 
 	while [ "$i" -lt "$DRAWHEIGHT" ]
 	do
 		j=0
-		drawstring=""
-		linearray=()
 		while [ "$j" -lt "$DRAWWIDTH" ]
 		do
+			let k=$DRAWWIDTH+1
+			let k=$k*$i
+			let k=$k+$j
+
 			drawchar=$(inascreen "$j" "$i" "$SCALEFACTOR")
-			linearray[$j]=$drawchar
-#			drawstring="$drawstring$drawchar"
+			linearray[$k]=$drawchar
 			let j=$j+1
 		done
-		echo "${linearray[@]}" | sed -e "s/\ //g"
+		let k=$k+1
+		linearray[$k]=$'\n'
 		let i=$i+1
 	done
+
+	echo "${linearray[@]}" | sed -e "s/\ //g" | sed -e "s/\./ /g"
 }
 
 
@@ -247,15 +374,6 @@ function reposition {
 				else
 					YPOSITIONS[$i]=${ORIGINALYPOSITIONS[$i]}
 				fi
-#			else
-#				if [ "$VERTICALJUSTIFICATION" == "2" ]; then
-#					let YPOSITIONS[$i]=$TALLBOI-${XRESOLUTIONS[$i]}
-#				else
-#					let YPOSITIONS[$i]=($TALLBOI-${XRESOLUTIONS[$i]})/2
-#				fi
-#			fi
-
-			echo "The Y position for display $i is ${YPOSITIONS[$i]}"
 		done
 	fi
 }
@@ -266,13 +384,9 @@ function dodisplayresets {
 	for i in ${REORDEREDLIST[@]}
 	do
 		OLDREORDEREDLIST[$j]=$i
-		
-		echo "remembering display $i's position"
-
 
 		OLDROTATIONLIST[$i]=${SCREENROTATIONS[$i]}
 
-		echo "remembering display $i's rotation ${OLDROTATIONLIST[$i]}"
 		OLDXPOSITIONS[$i]=${XPOSITIONS[$i]}
 		OLDYPOSITIONS[$i]=${YPOSITIONS[$i]}
 
@@ -292,9 +406,9 @@ function dodisplayresets {
 			let j=$i*$FIELDSPERDISPLAY
 			if [ "$k" == "0" ]; then
 				if [ "$NORUN" == "0" ]; then
-					xrandr --output ${XRANDRDATA[$j]} --off
+					xrandr --output ${DISPLAYNAME[$j]} --off
 				else
-					echo "xrandr --output ${XRANDRDATA[$j]} --off"
+					echo "xrandr --output ${DISPLAYNAME[$j]} --off"
 				fi
 			else
 				if [ "$NORUN" == "0" ]; then
@@ -322,14 +436,13 @@ function dodisplayresets {
 			for i in ${!OLDREORDEREDLIST[*]}
 			do
 				REORDEREDLIST[$i]=${OLDREORDEREDLIST[$i]}
-				echo "remembering that the $i display is ${REORDEREDLIST[$i]}"
 			done
 
 			for i in ${REORDEREDLIST[@]}
 			do
 
-				if ( [ "${SCREENROTATIONS[$i]}" == "normal" ] && ( [ "${OLDROTATIONLIST[$i]}" == "left" ] || [ "${OLDROTATIONLIST[$i]}" "right" ] ) ) \
-					|| ( [ "${OLDROTATIONLIST[$i]}" == "normal" ] && ( [ "${SCREENROTATIONS[$i]}" == "left" ] || [ "${SCREENROTATIONS[$i]}" "right" ] ) ); then
+				if ( [ "${SCREENROTATIONS[$i]}" == "normal" ] && ( [ "${OLDROTATIONLIST[$i]}" == "left" ] || [ "${OLDROTATIONLIST[$i]}" == "right" ] ) ) \
+					|| ( [ "${OLDROTATIONLIST[$i]}" == "normal" ] && ( [ "${SCREENROTATIONS[$i]}" == "left" ] || [ "${SCREENROTATIONS[$i]}" == "right" ] ) ); then
 					local tempdimvar=${XRESOLUTIONS[$i]}
 					XRESOLUTIONS[$i]=${YRESOLUTIONS[$i]}
 					YRESOLUTIONS[$i]=$tempdimvar
@@ -337,14 +450,10 @@ function dodisplayresets {
 
 				SCREENROTATIONS[$i]=${OLDROTATIONLIST[$i]}
 
-				echo "remembering that display $i is rotated ${SCREENROTATIONS[$i]}"
-
 				ORIGINALXPOSITIONS[$i]=${OLDXPOSITIONS[$i]}
 				ORIGINALYPOSITIONS[$i]=${OLDYPOSITIONS[$i]}
 				XPOSITIONS[$i]=${OLDXPOSITIONS[$i]}
 				YPOSITIONS[$i]=${OLDYPOSITIONS[$i]}
-
-				echo "remembering that display $i is located at ${ORIGINALXPOSITIONS[$i]},${ORIGINALYPOSITIONS[$i]}"
 				
 			done
 			
@@ -364,22 +473,22 @@ function dodisplayresets {
 function populatedisplayarrays {
 	i=0
 	j=0
-	while [ "$i" -lt "$NUMBEROFDISPLAYS" ]
+	while [ "$j" -lt "${#PORTS[*]}" ]
 	do
-		let j=$FIELDSPERDISPLAY*$i
-		DISPLAYNAME[$i]=${XRANDRDATA[$j]}
-		let j=$j+1
-		XRESOLUTIONS[$i]=${XRANDRDATA[$j]}
-		let j=$j+1
-		YRESOLUTIONS[$i]=${XRANDRDATA[$j]}
-		let j=$j+1
-		XPOSITIONS[$i]=${XRANDRDATA[$j]}
-		ORIGINALXPOSITIONS[$i]=${XRANDRDATA[$j]}
-		let j=$j+1
-		YPOSITIONS[$i]=${XRANDRDATA[$j]}
-		ORIGINALYPOSITIONS[$i]=${XRANDRDATA[$j]}
-		let j=$j+1
-		SCREENROTATIONS[$i]=${XRANDRDATA[$j]}
+		while ( [ "${PORTSSTATUS[$j]}" == "disconnected" ] || [ "${PORTSACTIVEMODE[$j]}" == "" ] ) && [ "$j" -lt "${#PORTS[*]}" ]
+		do
+			let j=j+1
+		done
+		DISPLAYNAME[$i]=${PORTS[$j]}
+		XRESOLUTIONS[$i]=${PORTSSIZEX[$j]}
+		YRESOLUTIONS[$i]=${PORTSSIZEY[$j]}
+		CURRENTMODE[$i]=${PORTSACTIVEMODE[$j]}
+		ORIGINALMODE[$i]=${PORTSACTIVEMODE[$j]}
+		XPOSITIONS[$i]=${PORTSPOSX[$j]}
+		ORIGINALXPOSITIONS[$i]=${PORTSPOSX[$j]}
+		YPOSITIONS[$i]=${PORTSPOSY[$j]}
+		ORIGINALYPOSITIONS[$i]=${PORTSPOSY[$j]}
+		SCREENROTATIONS[$i]=${PORTSROTATION[$j]}
 
 
 		if [ "$ISREORDEREDLIST" == "0" ]; then
@@ -387,7 +496,9 @@ function populatedisplayarrays {
 		fi
 
 		let i=$i+1
+		let j=$j+1
 	done
+	NUMBEROFDISPLAYS=$i
 	i=0
 	j=0
 
@@ -425,7 +536,7 @@ function generatexrandrcommands {
 
 	for i in ${REORDEREDLIST[@]}
 	do
-		CMNDTORUN="xrandr --output ${DISPLAYNAME[i]} --mode $(modepicker "${XRESOLUTIONS[i]}" "${YRESOLUTIONS[$i]}") --rotate ${SCREENROTATIONS[i]} --pos ${XPOSITIONS[$i]}x${YPOSITIONS[$i]}"
+		CMNDTORUN="xrandr --output ${DISPLAYNAME[$i]} --mode ${CURRENTMODE[$i]} --rotate ${SCREENROTATIONS[$i]} --pos ${XPOSITIONS[$i]}x${YPOSITIONS[$i]}"
 		echo $CMNDTORUN
 		if [ "$NORUN" == "0" ]; then
 			$CMNDTORUN
@@ -446,7 +557,7 @@ function executeselectedoptions {
 
 	# apply the requested rotations
 
-	if [ "$NOMENUMODE" == "1" ] && [ "$DOREPOSITION" == "1" ]; then
+	if ( [ "$NOMENUMODE" == "1" ] && [ "$DOREPOSITION" == "1" ] ) || [ "$MAKEPREVIEW" == "1" ] ; then
 		reposition
 		makeaprettypicture
 	fi
@@ -483,6 +594,9 @@ do
 		"--norun")
 			NORUN=1
 			;;
+		"--preview")
+			MAKEPREVIEW=1
+			;;
 		"--vertj="[0123]*)
 			DOREPOSITION=1
 			VERTICALJUSTIFICATION=$(echo $i | sed -e 's/.*\([0123]\)/\1/')
@@ -497,7 +611,12 @@ do
 		"--reposition"[=a-zA-Z]*)
 			DOREPOSITION=1
 			;;
-
+		"--consoleaspect="[0-9\.]*)
+			CONSOLEASPECTRATIO=$(echo $i | sed -e "s/.*\=\([0-9\.]*\)/scale=$PRECISION; (\1)\/1/" | bc -l )
+			;;
+		"--precision="[0-9]*)
+			PRECISION=$(echo $i | sed -e "s/.*\=\([0-9]*\)/\1/" )
+			;;
 	esac
 
 	NOMENUMODE=1

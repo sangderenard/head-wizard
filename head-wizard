@@ -200,7 +200,8 @@ function inascreen {
 					let k=${SCALEYPOSITIONS[$i]}+${SCALEYRESOLUTIONS[$i]}
 					if [ "$2" -lt "$k" ] || [ "$2" == "$k" ]; then
 						#echo "${displaychars[$i]}"
-						echo "$i"
+						local temptest='\e[3'"$i"';4'"$i"'m'"$i"'\e[0m'
+						echo "$temptest"
 						return
 					fi
 				fi
@@ -273,8 +274,8 @@ function makeaprettypicture {
 		linearray[$k]=$'\n'
 		let i=$i+1
 	done
-
-	echo "${linearray[@]}" | sed -e "s/\ //g" | sed -e "s/\./ /g"
+#	echo -e '\e[33m0\e0m'
+	echo -e "${linearray[@]}" | sed -e "s/\ //g" | sed -e "s/\./ /g"
 }
 
 
@@ -403,18 +404,17 @@ function dodisplayresets {
 
 		while [ "$i" -lt "$NUMBEROFDISPLAYS" ]
 		do
-			let j=$i*$FIELDSPERDISPLAY
 			if [ "$k" == "0" ]; then
 				if [ "$NORUN" == "0" ]; then
-					xrandr --output ${DISPLAYNAME[$j]} --off
+					xrandr --output ${DISPLAYNAME[$i]} --off
 				else
-					echo "xrandr --output ${DISPLAYNAME[$j]} --off"
+					echo "xrandr --output ${DISPLAYNAME[$i]} --off"
 				fi
 			else
 				if [ "$NORUN" == "0" ]; then
-					xrandr --output ${XRANDRDATA[$j]} --auto
+					xrandr --output ${DISPLAYNAME[$i]} --mode "${CURRENTMODE[$i]}"
 				else
-					echo "xrandr --output ${XRANDRDATA[$j]} --auto"
+					echo "xrandr --output ${DISPLAYNAME[$i]} --mode ${CURRENTMODE[$i]}"
 				fi
 			fi
 
@@ -698,6 +698,10 @@ function reorderingchooser {
 	DOREPOSITION=1
 }
 
+function colorcodeit {
+	echo -e $(echo "$1" | sed -e 's/\([0-9]\+\)\ \+/ \\e\[4\1m \1 \\e\[0m/g')
+}
+
 function mainmenu {
 	xrefresh
 	if [ "$NOMENUMODE" == "1" ]; then
@@ -713,13 +717,15 @@ function mainmenu {
 		tableformatter="%s\t$tableformatter"
 		let i=$i+1
 	done
-	
+
 	i=0
 
 	makeaprettypicture
+	local prettynames=( $(colorcodeit " ${!DISPLAYNAME[*]} ") )
+	echo -e ${prettynames[@]}
 
 	printf "\n"
-	printf "%s\t\t$tableformatter"\
+	printf  "%s\t\t$tableformatter"\
 		 "ID:" ${!DISPLAYNAME[*]}\
 		 "Adaptor_name:" ${DISPLAYNAME[@]}\
 		 "X_dimension:" ${XRESOLUTIONS[@]}\

@@ -489,6 +489,7 @@ function populatedisplayarrays {
 		YPOSITIONS[$i]=${PORTSPOSY[$j]}
 		ORIGINALYPOSITIONS[$i]=${PORTSPOSY[$j]}
 		SCREENROTATIONS[$i]=${PORTSROTATION[$j]}
+		DISPLAYPORTREFERENCE[$i]=$j
 
 
 		if [ "$ISREORDEREDLIST" == "0" ]; then
@@ -652,6 +653,33 @@ function rotationchooser {
 	else
 		ROTATIONORDER="$ROTATIONORDER $NEWROTATIONORDER"
 	fi
+
+}
+
+function modechooser {
+	echo "enter the number of the display you would like to set the mode for"
+	local PROPOSEDDISPLAY
+	read PROPOSEDDISPLAY
+	echo "the following mode is currently set for this display: ${CURRENTMODE[$PROPOSEDDISPLAY]}"
+	echo "the following modes are available:"
+	local AVAILABLEMODES=( "${PORTSRESLIST[${DISPLAYPORTREFERENCE[$PROPOSEDDISPLAY]}]}" )
+	select menuselection in ${AVAILABLEMODES[@]}
+	do
+		CURRENTMODE[$PROPOSEDDISPLAY]=$menuselection
+		if [ "${SCREENROTATIONS[$PROPOSEDDISPLAY]}" == "normal" ]; then
+			XRESOLUTIONS[$PROPOSEDDISPLAY]=$(echo $menuselection | sed -e 's/\([0-9]\+\)x\([0-9]\+\)/\1/')
+			YRESOLUTIONS[$PROPOSEDDISPLAY]=$(echo $menuselection | sed -e 's/\([0-9]\+\)x\([0-9]\+\)/\2/')
+		else
+			XRESOLUTIONS[$PROPOSEDDISPLAY]=$(echo $menuselection | sed -e 's/\([0-9]\+\)x\([0-9]\+\)/\2/')
+			YRESOLUTIONS[$PROPOSEDDISPLAY]=$(echo $menuselection | sed -e 's/\([0-9]\+\)x\([0-9]\+\)/\1/')
+		fi
+
+		ISREORDEREDLIST=1
+		DOREPOSITION=1
+		reposition
+
+		return
+	done
 	
 }
 
@@ -708,6 +736,7 @@ function mainmenu {
 			 "Edit Rotation/Translation"\
 			 "Vertical Justification: ${VERTICALJUSTIFICATIONREADABLE[$VERTICALJUSTIFICATION]}"\
 			 "Set Horizontal Screen Margin: $HORIZONTALSCREENMARGIN"\
+			 "Change A Display Mode (resolution)"
 			 "Execute" "Exit")
 	select menuchoice in "${menuarray[@]}"
 	do
@@ -736,7 +765,9 @@ function mainmenu {
 				DOREPOSITION=1
 				reposition
 			;;
-
+			"Change A Display Mode (resolution)")
+				modechooser
+			;;
 			"Reorder"[a-zA-Z0-9\:\ ]*)
 				reorderingchooser
 				checkifrepositioningstill
